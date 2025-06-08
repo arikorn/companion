@@ -61,7 +61,7 @@ import { SurfaceFirmwareUpdateCheck } from './FirmwareUpdateCheck.js'
 import { DataStoreTableView } from '../Data/StoreBase.js'
 import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 import z from 'zod'
-import type { EmulatorPageConfig } from '@companion-app/shared/Model/Emulator.js'
+import type { EmulatorListItem, EmulatorPageConfig } from '@companion-app/shared/Model/Emulator.js'
 
 // Force it to load the hidraw driver just in case
 HID.setDriverType('hidraw')
@@ -85,8 +85,8 @@ export interface SurfaceControllerEvents {
 }
 
 type UpdateEvents = EmulatorUpdateEvents & {
-	// emulatorConfig: [id: string, diff: JsonPatchOperation[] | EmulatorConfig]
 	emulatorPageConfig: [info: EmulatorPageConfig]
+	emulatorList: [list: EmulatorListItem[]]
 }
 
 export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
@@ -241,7 +241,9 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 				this.setAllLocked(false, true)
 			}
 		} else if (key === 'installName') {
-			this.#updateEvents.emit('emulatorPageConfig', this.#compileEmulatorPageConfig())
+			if (this.#updateEvents.listenerCount('emulatorPageConfig') > 0) {
+				this.#updateEvents.emit('emulatorPageConfig', this.#compileEmulatorPageConfig())
+			}
 		}
 	}
 
@@ -249,6 +251,24 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 		return {
 			installName: this.#handlerDependencies.userconfig.getKey('installName'),
 		}
+	}
+
+	#compileEmulatorList(): EmulatorListItem[] {
+		const items: EmulatorListItem[] = []
+
+		for (const [id, surface] of this.#surfaceHandlers) {
+			if (surface && id.startsWith('emulator:')) {
+				//&& surface.panel instanceof SurfaceIPElgatoEmulator) {
+
+				const trimmedId = id.slice('emulator:'.length)
+				items.push({
+					id: trimmedId,
+					name: surface.getFullConfig().name ?? `Emulator (${trimmedId})`,
+				})
+			}
+		}
+
+		return items.sort((a, b) => a.name.localeCompare(b.name))
 	}
 
 	#startStopLockoutTimer() {
@@ -576,6 +596,16 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 				}
 			}),
 
+			emulatorList: publicProcedure.subscription(async function* ({ signal }) {
+				const changes = toIterable(self.#updateEvents, 'emulatorList', signal)
+
+				yield self.#compileEmulatorList()
+
+				for await (const [info] of changes) {
+					yield info
+				}
+			}),
+
 			emulatorConfig: publicProcedure.input(z.object({ id: z.string() })).subscription(async function* ({
 				signal,
 				input,
@@ -842,6 +872,10 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 
 	updateDevicesList(): void {
 		const newJsonArr = cloneDeep(this.getDevicesList())
+
+		if (this.#updateEvents.listenerCount('emulatorList') > 0) {
+			this.#updateEvents.emit('emulatorList', this.#compileEmulatorList())
+		}
 
 		const hasSubscribers = this.#io.countRoomMembers(SurfacesRoom) > 0
 
