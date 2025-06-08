@@ -61,6 +61,7 @@ import { SurfaceFirmwareUpdateCheck } from './FirmwareUpdateCheck.js'
 import { DataStoreTableView } from '../Data/StoreBase.js'
 import { publicProcedure, router, toIterable } from '../UI/TRPC.js'
 import z from 'zod'
+import type { EmulatorPageConfig } from '@companion-app/shared/Model/Emulator.js'
 
 // Force it to load the hidraw driver just in case
 HID.setDriverType('hidraw')
@@ -85,6 +86,7 @@ export interface SurfaceControllerEvents {
 
 type UpdateEvents = EmulatorUpdateEvents & {
 	// emulatorConfig: [id: string, diff: JsonPatchOperation[] | EmulatorConfig]
+	emulatorPageConfig: [info: EmulatorPageConfig]
 }
 
 export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
@@ -238,6 +240,14 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 				// Ensure all are unlocked
 				this.setAllLocked(false, true)
 			}
+		} else if (key === 'installName') {
+			this.#updateEvents.emit('emulatorPageConfig', this.#compileEmulatorPageConfig())
+		}
+	}
+
+	#compileEmulatorPageConfig(): EmulatorPageConfig {
+		return {
+			installName: this.#handlerDependencies.userconfig.getKey('installName'),
 		}
 	}
 
@@ -556,6 +566,16 @@ export class SurfaceController extends EventEmitter<SurfaceControllerEvents> {
 	createTrpcRouter() {
 		const self = this
 		return router({
+			emulatorPageConfig: publicProcedure.subscription(async function* ({ signal }) {
+				const changes = toIterable(self.#updateEvents, 'emulatorPageConfig', signal)
+
+				yield self.#compileEmulatorPageConfig()
+
+				for await (const [info] of changes) {
+					yield info
+				}
+			}),
+
 			emulatorConfig: publicProcedure.input(z.object({ id: z.string() })).subscription(async function* ({
 				signal,
 				input,
