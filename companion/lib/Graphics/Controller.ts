@@ -512,9 +512,16 @@ export class GraphicsController extends EventEmitter<GraphicsControllerEvents> {
 
 		const args: Parameters<typeof GraphicsRenderer.drawImageBuffers> = [showTopbar, imageBuffers]
 
-		// if (DEBUG_DISABLE_RENDER_THREADING) {
-		return GraphicsRenderer.drawImageBuffers(...args)
-		// }
+		if (DEBUG_DISABLE_RENDER_THREADING) {
+			return GraphicsRenderer.drawImageBuffers(...args)
+		}
+
+		try {
+			return this.#pool.exec('drawImageBuffers', args)
+		} catch (e: any) {
+			// if a worker crashes, the first attempt will fail, retry when that happens, but not infinitely
+			throw e
+		}
 	}
 
 	/**
